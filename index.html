@@ -1,0 +1,209 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Past Projects Map</title>
+
+  <!-- Leaflet + MarkerCluster (no API key, no billing, no quota) -->
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+  <link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.css" />
+  <link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.Default.css" />
+  <link rel="stylesheet" href="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.css" />
+
+  <style>
+    :root {
+      --brand: #14532d;            /* brand blue — data/clusters, not the UI chrome */
+      --chrome: #27425c;         /* UI chrome (top bar + side panel): muted slate-blue */
+      --chrome-hover: #34557a;   /* card hover */
+      --on-blue: #cdd8ee;        /* secondary text on the chrome */
+      --line: #dce3ea; --bg: #f2f5f8;
+    }
+    * { box-sizing: border-box; }
+    html, body { height: 100%; }
+    body { margin: 0; font-family: system-ui, Arial, sans-serif; color: #1a1a1a; display: flex; flex-direction: column; }
+
+    /* (header removed for the iframe embed — title lives on the host page) */
+
+    .toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 10px;
+               padding: 10px 20px; background: var(--chrome); border-bottom: 1px solid rgba(0,0,0,.18); }
+    .toolbar label { font-size: 12px; color: var(--on-blue); margin-right: 4px; }
+    .toolbar select, .toolbar input { font-size: 13px; padding: 6px 8px; border: 1px solid #c4cfd9;
+               border-radius: 6px; background: #fff; }
+    .toolbar input { min-width: 200px; }
+    #filter-reset { cursor: pointer; border: 1px solid #c4cfd9; background: #fff; border-radius: 6px;
+               padding: 6px 12px; font-size: 13px; }
+    #filter-reset:hover { background: #eef3f7; }
+    #result-count { margin-left: auto; font-size: 13px; font-weight: 600; color: #fff; letter-spacing: .2px; }
+
+    .layout { flex: 1; display: flex; min-height: 0; position: relative; }
+
+    /* Loading overlay (covers the map until markers are ready) */
+    .map-loading { position: absolute; inset: 0; z-index: 1000; display: flex; flex-direction: column;
+                   align-items: center; justify-content: center; gap: 12px;
+                   background: #eef1f5; color: var(--chrome); font-size: 14px; font-weight: 600; }
+    .map-loading.hidden { display: none; }
+    .spinner { width: 38px; height: 38px; border: 4px solid #c9d4e3; border-top-color: var(--chrome);
+               border-radius: 50%; animation: spin .8s linear infinite; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    .panel { width: 340px; border-right: 1px solid rgba(0,0,0,.18); overflow-y: auto; background: var(--chrome); }
+    #mapclusterer { flex: 1; min-width: 0; background: #e8eef2; }
+
+    /* Compact embed (?compact=1, e.g. the homepage iframe): hide the side list at
+       ANY width so the map is the hero in a narrower slot. The flex layout gives
+       the freed space to the map automatically. */
+    .compact .panel { display: none; }
+
+    /* ── MAP COLORS ─────────────────────────────────────────────────
+       Clusters are colored by DENSITY: light blue = fewer jobs in the
+       area, deep brand blue = many. Pins are a single complementary
+       accent. To recolor the whole map, change just these 4 values. */
+    :root {
+      --cluster-small:  #7cc59a;   /* clusters of a few jobs   */
+      --cluster-medium: #2f8f5f;   /* clusters of some jobs    */
+      --cluster-large:  #14532d;   /* clusters of many (brand) */
+      --pin:            #14532d;   /* individual project pins (accent) */
+    }
+    .marker-cluster span         { color: #fff; font-weight: 700; }
+    .marker-cluster-small        { background: color-mix(in srgb, var(--cluster-small) 45%, transparent); }
+    .marker-cluster-small  div   { background: var(--cluster-small); }
+    .marker-cluster-medium       { background: color-mix(in srgb, var(--cluster-medium) 45%, transparent); }
+    .marker-cluster-medium div   { background: var(--cluster-medium); }
+    .marker-cluster-large        { background: color-mix(in srgb, var(--cluster-large) 45%, transparent); }
+    .marker-cluster-large  div   { background: var(--cluster-large); }
+    /* Pin fill/stroke are set per-marker in app.js (color = the project's primary
+       category), so no `fill` here — a CSS fill would override the inline color. */
+    .project-pin { fill-opacity: .92; }
+
+    .project-card { display: block; width: 100%; text-align: left; cursor: pointer;
+               border: none; border-bottom: 1px solid rgba(255,255,255,.14); background: var(--chrome);
+               padding: 12px 16px; font: inherit; color: #fff; }
+    .project-card:hover { background: var(--chrome-hover); }
+    .card-title { font-weight: 700; color: #fff; font-size: 14px; }
+    .card-loc { font-size: 12px; color: var(--on-blue); margin-top: 1px; }
+    .card-photo { display: inline-block; margin-top: 6px; font-size: 11px; color: #fff;
+               background: rgba(255,255,255,.16); border-radius: 4px; padding: 1px 6px; }
+    .empty { padding: 24px 16px; color: var(--on-blue); font-size: 13px; }
+
+    .pp-info { font-size: 13px; max-width: 240px; }
+    .pp-info-title { font-weight: 700; color: var(--brand); margin-bottom: 2px; }
+    .pp-info-loc { color: #444; }
+    .pp-info-products { margin-top: 4px; font-size: 12px; color: #5b6b7c; font-style: italic; }
+    .pp-info-meta { margin-top: 6px; font-size: 11px; color: var(--brand); }
+    .card-products { font-size: 11px; color: var(--on-blue); margin-top: 2px; font-style: italic; }
+
+    /* "Near me" popup: radius selector + conversion CTA */
+    .nearme-pop { min-width: 216px; }
+    .radius-row { display: flex; gap: 4px; margin: 9px 0 8px; }
+    .radius-btn { flex: 1; padding: 5px 0; font: 600 11px system-ui, Arial, sans-serif;
+                  border: 1px solid #c4cfd9; background: #fff; color: var(--chrome);
+                  border-radius: 5px; cursor: pointer; }
+    .radius-btn:hover { background: #eef3f7; }
+    .radius-btn.active { background: var(--brand); color: #fff; border-color: var(--brand); }
+    /* Scoped to beat Leaflet's default `.leaflet-popup-content a` link color,
+       which otherwise overrides the white text on the red button. */
+    .leaflet-popup-content a.cta-btn,
+    .leaflet-popup-content a.cta-btn:hover {
+               display: block; text-align: center; margin-top: 2px; padding: 9px 10px;
+               background: var(--pin); color: #ffffff; font: 700 13px system-ui, Arial, sans-serif;
+               border-radius: 6px; text-decoration: none; letter-spacing: .2px; }
+    .leaflet-popup-content a.cta-btn:hover { filter: brightness(1.08); }
+    .load-error { padding: 24px; font-size: 14px; color: #b00; line-height: 1.5; }
+    code { background: #00000010; padding: 1px 4px; border-radius: 3px; }
+
+    /* Density legend (bottom-right map control) */
+    .map-legend { background: #fff; color: #1a2330; border-radius: 8px; padding: 8px 10px;
+                  font-size: 11px; line-height: 1.3; box-shadow: 0 1px 5px rgba(0,0,0,.28);
+                  border: 1px solid rgba(0,0,0,.1); }
+    .legend-title { font-weight: 700; color: var(--chrome); margin-bottom: 5px; }
+    .legend-ramp { display: flex; align-items: center; gap: 3px; margin-bottom: 5px; }
+    .legend-ramp span { color: #666; font-size: 10px; }
+    .legend-ramp .lg { width: 16px; height: 12px; border-radius: 2px; display: inline-block; }
+    .legend-ramp .lg-s { background: var(--cluster-small); }
+    .legend-ramp .lg-m { background: var(--cluster-medium); }
+    .legend-ramp .lg-l { background: var(--cluster-large); }
+    .legend-pin { display: flex; align-items: center; gap: 6px; color: #333; }
+    .legend-pin .lg-dot { width: 11px; height: 11px; border-radius: 50%; background: var(--pin);
+                  border: 1.5px solid #fff; box-shadow: 0 0 0 1px rgba(0,0,0,.2); display: inline-block; }
+    /* Category color key (individual pins are colored by project type) */
+    .legend-sep { height: 1px; background: var(--line); margin: 7px 0 6px; }
+    .legend-cats { display: grid; gap: 3px; }
+    .legend-cat { display: flex; align-items: center; gap: 6px; color: #333; font-size: 10.5px; }
+    .legend-cat .lg-dot { width: 10px; height: 10px; border-radius: 50%; border: 1.5px solid #fff;
+                  box-shadow: 0 0 0 1px rgba(0,0,0,.2); display: inline-block; flex: none; }
+
+    /* Fullscreen toggle button (top-right map control) */
+    .map-fs-btn { width: 34px; height: 34px; background: #fff; border: none; border-radius: 6px;
+                  box-shadow: 0 1px 4px rgba(0,0,0,.3); cursor: pointer; color: var(--chrome);
+                  display: flex; align-items: center; justify-content: center; padding: 0; }
+    .map-fs-btn:hover { background: #eef2f7; }
+    .map-fs-btn.is-full { color: var(--pin); }   /* the ✕ reads clearly while fullscreen */
+
+    /* "Near me" geolocation button (top-right map control) */
+    .map-nearme-btn { display: flex; align-items: center; gap: 6px; background: #fff; border: none;
+                  border-radius: 6px; box-shadow: 0 1px 4px rgba(0,0,0,.3); cursor: pointer;
+                  color: var(--chrome); font: 600 13px system-ui, Arial, sans-serif; padding: 7px 10px; }
+    .map-nearme-btn:hover { background: #eef2f7; }
+    .map-nearme-btn svg { color: var(--pin); flex: none; }
+    .map-nearme-btn.locating { opacity: .6; cursor: progress; }
+
+    /* "You are here" pulsing location dot */
+    .you-dot { display: block; width: 14px; height: 14px; border-radius: 50%; background: #1565c0;
+                  border: 2px solid #fff; box-shadow: 0 0 0 2px rgba(21,101,192,.45); position: relative; }
+    .you-dot::after { content: ""; position: absolute; inset: -6px; border-radius: 50%;
+                  border: 2px solid rgba(21,101,192,.55); animation: youpulse 1.8s ease-out infinite; }
+    @keyframes youpulse { 0% { transform: scale(.55); opacity: .85; } 100% { transform: scale(1.7); opacity: 0; } }
+
+    /* Visually-hidden live region for screen-reader announcements */
+    .sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden;
+                  clip: rect(0 0 0 0); white-space: nowrap; border: 0; }
+
+    /* Accessibility: clear keyboard focus on every interactive element */
+    .toolbar select:focus-visible, .toolbar input:focus-visible, #filter-reset:focus-visible,
+    .project-card:focus-visible, .map-fs-btn:focus-visible, .leaflet-control a:focus-visible,
+    .radius-btn:focus-visible, .cta-btn:focus-visible {
+      outline: 3px solid #ffd54a; outline-offset: 2px;
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      * { transition: none !important; animation: none !important; }
+    }
+
+    /* Phones: the map is the hero. Hide the secondary list panel so the map
+       fills the frame, and keep a compact filter bar on top. (Tablet/desktop
+       keep the side list — see the .panel rule above.) */
+    @media (max-width: 720px) {
+      .panel { display: none; }
+      .toolbar { padding: 8px 12px; gap: 6px 10px; }
+      .toolbar label { display: none; }            /* option text + placeholder are self-explanatory */
+      .toolbar input { min-width: 0; }             /* let the search box shrink instead of overflow */
+      #result-count { display: block; width: 100%; margin: 0; text-align: right; }
+    }
+  </style>
+</head>
+<body>
+
+  <div id="sr-status" class="sr-only" aria-live="polite" aria-atomic="true"></div>
+
+  <div class="toolbar" role="region" aria-label="Map filters">
+    <span><label for="filter-type">Project type</label>
+      <select id="filter-type" aria-label="Filter by project type"><option value="">All project types</option></select></span>
+    <span><label for="filter-search">Search</label>
+      <input id="filter-search" type="search" placeholder="City or state…" aria-label="Search projects by city or state" /></span>
+    <button id="filter-reset" aria-label="Reset all filters">Reset</button>
+    <span id="result-count" aria-live="polite" aria-atomic="true"></span>
+  </div>
+
+  <div class="layout">
+    <div class="panel" role="region" aria-label="Project list"><div id="project-list"></div></div>
+    <div id="mapclusterer" role="region" aria-label="Map of completed projects"></div>
+    <div id="map-loading" class="map-loading"><div class="spinner" aria-hidden="true"></div><span>Loading projects…</span></div>
+  </div>
+
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <script src="https://unpkg.com/leaflet.markercluster@1.5.3/dist/leaflet.markercluster.js"></script>
+  <script src="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.js"></script>
+  <script src="https://unpkg.com/@maplibre/maplibre-gl-leaflet@0.0.22/leaflet-maplibre-gl.js"></script>
+  <script src="app.js?v=16"></script>
+</body>
+</html>
