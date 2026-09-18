@@ -45,3 +45,24 @@ Any static host works:
   here so Pages serves it as-is). Optionally add a `CNAME` for a custom domain.
 - **Vercel / Netlify** — import the repo (or drag-drop the folder); it's detected as a static site,
   no build command needed.
+
+## Embedding it in another page
+
+When embedding the map in an `<iframe>`, the parent page **must delegate the browser permissions**
+the map uses — otherwise "Near me" (geolocation) and the fullscreen button are silently blocked
+inside the frame (a cross-origin Permissions-Policy rule; it has nothing to do with the network):
+
+```html
+<iframe
+  src="https://YOUR-DEPLOY-URL"
+  title="Past Projects Map"
+  allow="geolocation; fullscreen"
+  allowfullscreen
+  style="width:100%; height:80vh; min-height:560px; border:0;"
+  loading="lazy"></iframe>
+```
+
+- `allow="geolocation"` unblocks **Near me**; `allow="fullscreen"` + `allowfullscreen` unblock the
+  fullscreen control. Both fail quietly in an iframe without these.
+- The embedding page must be served over **HTTPS** — geolocation only runs in a secure context.
+- Opening the deploy URL directly (top-level, not framed) needs none of this; it works as-is.
